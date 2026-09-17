@@ -1,14 +1,20 @@
-Master Development Plan
+Master Development Plan — v2 (Revised)
 
 Building, Validating & Verifying Three Quantum Algorithms
 
 Algorithms in Scope:
-1. Quantum Tensor Networks (MPS / Tensor-Train Decomposition)
-2. Quantum Spectral Clustering (QPCA-based Spectral Decomposition)
-3. Quantum Reinforcement Learning (VQC-based RL Agent)
+1. Quantum Tensor Networks (MPS-based quantum circuit simulation & compression)
+2. Quantum Spectral Clustering (QPCA + eigenvector extraction for clustering)
+3. Quantum Reinforcement Learning (VQC-based agent)
 
-Plan Horizon: 36 Weeks (9 Months)
-Document Purpose: Pre-Implementation Blueprint with explicit acceptance criteria and verification standards.
+Revision Basis: Independent technical review (v1 score 6.5–7/10). v2 closes 5 critical gaps:
+- G-QPCA: eigenvector extraction, not eigenvalues only
+- G-HW: GridWorld (not CartPole) for hardware runs
+- G-Noise: extended hardware noise model
+- G-Stats: acceptance criteria tied to shots & seeds (≥10 seeds, 95% CI)
+- G-Exec: compute budget, pinned datasets/versions, resolved sequencing
+
+Plan Horizon: 40 Weeks (10 Months)
 
 ---
 
@@ -18,184 +24,219 @@ Part 1 — Definitions, Scope & Success Criteria
 Design, implement, and scientifically verify three quantum algorithms through a staged pipeline:
 Classical Simulation → Noisy Simulation → Real Quantum Hardware → Formal Benchmarking.
 
-1.2 Out of Scope
-- No claims of quantum advantage (unproven on current hardware).
-- No production deployment; this is a research and validation program.
+1.2 Explicit Scope of Each Algorithm
 
-1.3 Definition of "Verified"
-An algorithm is Verified only when ALL of the following hold:
-- V1 (Correctness): Output matches classical reference within defined tolerance on identical inputs.
-- V2 (Reproducibility): Results consistent across ≥ 5 independent runs (variance below threshold).
-- V3 (Noise Bounds): Performance degradation under simulated hardware noise documented and bounded.
-- V4 (Resource Audit): Qubit count, circuit depth, and parameter count measured and recorded.
-- V5 (Ablation): Each component of the algorithm tested in isolation and shown to be necessary.
+Algorithm	In Scope	Out of Scope	
+Tensor Networks	(a) MPS simulation of quantum circuits; (b) MPS/TT compression of classical weight matrices; (c) execution of one depth-reduced compressed circuit on hardware	Classical-only compression without any quantum circuit execution	
+QPCA	Eigenvalues and eigenvectors of a low-rank covariance matrix, sufficient for spectral clustering on ≤ 8 qubits	Full-rank PCA; big-data regimes beyond 8 qubits	
+QRL	VQC agent on CartPole (simulator only) and 4×4 GridWorld (simulator + hardware)	Continuous-control tasks on real hardware	
+
+1.3 Definition of "Verified" (unchanged core, measurable now)
+- V1 (Correctness): Output matches classical reference within tolerance at specified shot budget and confidence level.
+- V2 (Reproducibility): ≥ 10 independent seeds; bootstrap 95% CI reported; std below per-algorithm threshold.
+- V3 (Noise Bounds): Performance vs. noise documented under the extended model §2.4.
+- V4 (Resource Audit): Qubits, two-qubit depth, shot count, parameter count, transpiled gate count on target hardware.
+- V5 (Ablation): Each component shown necessary via ablation.
+
+1.4 No Quantum Advantage Claims
+All results reported as proof-of-concept benchmarks on NISQ hardware. Any speedup claim requires an explicit classical baseline run under identical accuracy constraints.
 
 ---
 
-Part 2 — Verification & Testing Standards (Applied Globally)
+Part 2 — Verification & Testing Standards
 
-2.1 Test Environment
+2.1 Test Environment (pinned)
 
 Item	Standard	
-Language	Python 3.11+	
-Classical stack	NumPy, SciPy, Matplotlib, NetworkX	
-Quantum SDKs	Qiskit 1.x (IBM), PennyLane 0.3x (Xanadu), Cirq	
-Tensor network libs	Quimb, TensorNetwork (Google), ITensor (optional)	
-Simulators	`statevector_simulator`, `qasm_simulator`, `qsim` (Cirq), `lightning.qubit` (PennyLane)	
-Noise models	Qiskit Aer noise module (T1/T2, gate errors, readout error)	
-Version control	Git + tagged releases per milestone	
-Testing framework	`pytest` (unit), `hypothesis` (property-based), `benchmark` (performance)	
+Language	Python 3.11.x (pin exact patch)	
+Classical	numpy 2.x, scipy 1.x, matplotlib, networkx	
+Quantum SDKs	Qiskit 1.3.x + qiskit-aer; PennyLane 0.39.x; Cirq 1.5.x	
+Tensor libs	Quimb 1.8.x, TensorNetwork (google)	
+Simulators	`aer_simulator_statevector`, `aer_simulator` (qasm), `qsim`, `lightning.qubit`	
+CI	GitHub Actions, weekly scheduled re-test	
+Testing	`pytest` + `hypothesis` + custom benchmark harness	
 
-2.2 Mandatory Test Pyramid (per algorithm)
+2.2 Fixed, Versioned Datasets (committed to repo)
 
-```
-Level 1 — Unit Tests:        every gate, every decomposition, every encoding function
-Level 2 — Property Tests:    invariants (unitarity, trace preservation, Hermiticity)
-Level 3 — Integration Tests: full pipeline on small instances (n ≤ 10 qubits)
-Level 4 — Regression Tests:  golden datasets fixed and rerun after every change
-Level 5 — Statistical Tests: ≥ 5 seeds, mean ± std reported, 95% CI computed
-```
+Task	Dataset	Note	
+Clustering	`data/synth_circles_v1.npz` (concentric circles, spectrally separable) + MNIST-1k subset (`data/mnist1k_v1.npz`)	Hashes recorded in `DATASETS.md`	
+RL	`CartPole-v1` (sim only), `GridWorld4x4_v1` (custom, deterministic seed set)	Env wrappers versioned	
+Tensor Networks	GHZ, W, and random-MPS states with known entanglement spectra (`data/tn_states_v1/`)	Ground truth generated by exact diagonalization	
 
-2.3 Numeric Tolerances
+2.3 Statistical Protocol (mandatory, replaces "5 runs")
+- Seeds: ≥ 10 fixed seeds per experiment (recorded in `seeds.json`).
+- Shots: all shot-based results report the shot budget; convergence vs. shots curve is mandatory for QPCA and QRL.
+- Confidence: bootstrap 95% CI on the primary metric; report mean ± std.
+- Pre-registration: before Phase 3, hypotheses, metrics, and thresholds frozen in `PREREGISTRATION.md`; deviations logged.
+
+2.4 Extended Hardware Noise Model (replaces basic T1/T2 model)
+
+Parameter	Value	Source	
+T1 / T2	100 µs / 150 µs	baseline	
+1q gate error	1e-3	baseline	
+2q gate error	1e-2	baseline	
+Readout error	2%	baseline	
+Gate durations	1q: 30 ns, 2q: 300 ns	required for time-aware decoherence	
+Topology	Fixed 127-qubit heavy-hex coupling map	circuits must be transpiled under real connectivity	
+Crosstalk	Nearest-neighbor 2q error inflation +50%	applied where qubits are adjacent	
+Drift	±20% parameter variation over a 24h simulated window	robustness sweep	
+Measurement latency	1 µs readout + classical feedback delay	included in RL circuit timing only	
+
+2.5 Numeric Tolerances (shot- and seed-aware)
 
 Quantity	Tolerance	
-Statevector fidelity vs. classical reference	≥ 0.999	
-Eigenvalue error (QPCA)	≤ 1e-4 (simulator), ≤ 0.05 (hardware)	
-Compressed tensor network relative error	≤ 5% at target bond dimension	
-RL agent task success	≥ 90% over last 100 episodes	
-Circuit output vs. ideal (hardware, mitigated)	within 15% of simulator	
+MPS reconstruction error (statevector, exact)	≤ 1e-10 (10 qubits)	
+Compressed TN relative error at target bond dim	≤ 5% (mean over 10 seeds, 95% CI half-width ≤ 1%)	
+QPCA eigenvalue error (statevector sim)	≤ 1e-4	
+QPCA eigenvalue error (shot-based, ≥ 100k shots)	≤ 0.02 with 95% CI	
+QPCA clustering accuracy vs. classical spectral clustering	≥ 90% of classical ARI on same data	
+QRL (sim): task success over last 100 episodes	≥ 90% (≥ 10 seeds)	
+QRL (hardware GridWorld): success	≥ 80% vs. noisy-sim prediction within 15%	
+Hardware vs. noisy-simulator primary metric	within 15%	
 
-2.4 Hardware Noise Model Parameters (fixed for all experiments)
-
-Parameter	Value	
-T1 relaxation	100 µs	
-T2 dephasing	150 µs	
-Single-qubit gate error	1e-3	
-Two-qubit gate error	1e-2	
-Readout error	2%	
-
-2.5 Go / No-Go Gates
+2.6 Go / No-Go Gates
 
 Gate	Timing	Criterion	
-G0	End of Week 4	Team, environment, repos ready	
-G1	End of Week 12	All 3 algorithms pass V1–V2 on classical simulator	
-G2	End of Week 22	Noise-resilience report complete; performance ≥ 80% of ideal under §2.4 noise	
-G3	End of Week 30	Hardware results within 15% of noisy-simulator predictions	
-G4	End of Week 36	Full verification matrix (§1.3) signed off	
+G0	Week 4	Team, env pinned, repos, datasets hashed, pre-registration draft	
+G1	Week 12	All 3 algorithms pass V1–V2 (≥ 10 seeds) on classical simulator	
+G2	Week 24	Extended-noise report; performance ≥ 80% of ideal; QPCA eigenvector extraction validated	
+G3	Week 34	Hardware: QPCA-6q, TN compressed circuit, GridWorld-5q within 15% of noisy sim	
+G4	Week 40	Full verification matrix signed; pre-registered analysis complete	
 
 ---
 
-Part 3 — Phase 0: Theoretical & Engineering Foundations (Weeks 1–4)
+Part 3 — Phase 0: Foundations (Weeks 1–4)
 
-Week	Task	Deliverable	Acceptance Test	
-1	Team setup: quantum physicist, ML engineer, Python developer	Org chart, roles	—	
-1–2	Study: linear algebra (spectral theory, SVD), QM (states, gates, entanglement), QI theory (von Neumann entropy, coherence)	Reading log	Written technical quiz, pass ≥ 80%	
-2–3	Environment provisioning: Python 3.11+, Jupyter, Git repo, CI (GitHub Actions)	Working repo with CI badge	CI green on empty repo	
-3–4	Install & smoke-test all SDKs (Qiskit, PennyLane, Cirq, Quimb)	`environment.yml` + smoke test script	All imports succeed; Bell state simulation matches theory	
-4	Reference corpus fixed (Lloyd et al. 2014; Orús 2019; Dunjko & Briegel 2018)	`REFERENCES.md`	Peer review of reading notes	
+Week	Task	Deliverable	Acceptance	
+1	Team setup	Roles doc	—	
+1–2	Study: spectral theory/SVD; QM; QI theory	Reading log	Quiz ≥ 80%	
+2–3	Environment + CI	`environment.yml` (pinned), CI badge	CI green	
+3–4	Datasets fixed & hashed; `seeds.json`; `PREREGISTRATION.md` draft	repo artifacts	Data hashes + env reproducible on clean machine	
+4	Compute budget estimation (§8) signed off	`COMPUTE_BUDGET.md`	—	
 
 ---
 
 Part 4 — Phase 1: Classical Simulation (Weeks 5–12)
 
-4.A Algorithm 1 — Quantum Tensor Networks (MPS)
+Sequencing rule (resolves v1 contradiction): the three tracks run in parallel from Week 5, but gate reviews are sequential: TN (Week 10) → QPCA (Week 11) → QRL (Week 12). Full verification resources follow that order of priority.
+
+4.A Tensor Networks (MPS)
 
 Week	Task	Verification Standard	
-5–6	Implement MPS decomposition via successive SVD from scratch (no library)	Reconstructed tensor matches full matrix with relative error ≤ 1e-10 for 10–12 qubits	
-7–8	Implement expectation values ⟨ψ\|O\|ψ⟩ and entanglement entropy from Schmidt coefficients	Agreement with exact diagonalization ≤ 1e-9; entropy check: maximally entangled states give log(d)	
-9–10	Implement bond-dimension truncation with error control	Documented error vs. bond dimension curve; ≤ 5% error at chosen bond dimension	
-11–12	Application: compress weight matrices of a small language model layer	Model accuracy drop ≤ 2% after ≥ 50× compression	
-Unit tests	Unitarity of isometries, canonical form invariance	100% pass (`pytest`)	
+5–6	MPS decomposition via successive SVD from scratch	Rel. error ≤ 1e-10 vs. full tensor, 10–12 qubits; unit tests: canonical form, isometry	
+7–8	Expectation values + entanglement entropy from Schmidt coeffs	Agreement with exact diagonalization ≤ 1e-9	
+9–10	Bond-dim truncation + error control; Ablation V5: truncation vs. error curve	≤ 5% error at target bond dim (10 seeds, CI ≤ 1%)	
+11–12	Application: compress small LM layer weights + execute one depth-reduced circuit under transpilation	Accuracy drop ≤ 2% at ≥ 50× compression; transpiled 2q depth logged	
 
-4.B Algorithm 2 — Quantum Spectral Clustering (QPCA)
-
-Week	Task	Verification Standard	
-5–6	Classical baseline: PCA + spectral clustering on a fixed dataset (e.g., MNIST-1k subset)	Clustering accuracy ≥ 85% (adjusted Rand index recorded)	
-7–8	Simulate QPCA stages: (a) encode covariance matrix as density matrix ρ; (b) simulate time evolution e^{-iρt}; (c) extract eigenvalues via quantum phase estimation simulation	Eigenvalue agreement with `numpy.linalg.eigh` ≤ 1e-4	
-9–10	Integrate full pipeline on 8–10 qubits	Output identical to classical reference within tolerance on same data	
-11–12	Complexity profiling: runtime vs. problem size	Log of scaling exponents; reproducible benchmark script committed	
-Unit tests	ρ is Hermitian, trace = 1, positive semi-definite	Property tests via `hypothesis`, 100% pass	
-
-4.C Algorithm 3 — Quantum Reinforcement Learning (VQC-based)
+4.B QPCA (eigenvalues AND eigenvectors)
 
 Week	Task	Verification Standard	
-5–6	Classical baseline: DQN on CartPole-v1	Solved in ≤ 500 episodes (OpenAI Gym threshold: 475/500 avg reward)	
-7–8	Design VQC: state encoding (angle encoding), variational ansatz (rotation + entangling layers)	Variance check: gradient variance at initialization > threshold (Barren Plateau screen); circuit depth recorded	
-9–10	Train VQC as value function on statevector simulator	Task success ≥ 90% over last 100 episodes; convergence within 2000 episodes	
-11–12	A/B comparison: classical NN vs. VQC agent	Report: convergence speed, stability, parameter count, final reward	
-Unit tests	Encoding maps valid states to valid quantum states (norm = 1)	100% pass	
+5–6	Classical baseline: PCA + spectral clustering on §2.2 datasets	ARI ≥ classical reference; recorded	
+7–8	Encode covariance as ρ; simulate e^{-iρt}; QPE for eigenvalues	Eigenvalue error ≤ 1e-4 vs. `eigh` (statevector)	
+9–10	Eigenvector extraction — method selection (pre-registered): (a) quantum kernel built from swap-test overlaps between	ψ_j⟩ states; (b) low-fidelity tomography of top-k eigenvectors; chosen method justified in writing	
+11–12	Integrated pipeline 8–10 qubits; Ablation V5: encoding vs. no-encoding comparison	Matches classical reference within §2.5; complexity log committed	
 
-Phase 1 Exit (Gate G1): all three algorithms pass V1 and V2 (§1.3).
+4.C QRL
+
+Week	Task	Verification Standard	
+5–6	Classical DQN baseline, CartPole-v1	Solved ≤ 500 episodes (Gym threshold)	
+7–8	VQC design (angle encoding + entangling ansatz); Barren plateau screen: gradient variance at init > 1e-6	Depth/params logged	
+9–10	Train VQC value function on statevector sim	Success ≥ 90% over last 100 episodes, ≥ 10 seeds, CI reported	
+11–12	GridWorld 4×4 VQC agent (sim); A/B: NN vs VQC	Convergence, stability, param counts reported	
+
+Gate G1 (Week 12): V1 + V2 met for all three tracks.
 
 ---
 
-Part 5 — Phase 2: Noisy Simulation (Weeks 13–22)
+Part 5 — Phase 2: Noisy Simulation with Extended Model (Weeks 13–24)
 
 Week	Task	Verification Standard	
-13–14	Apply §2.4 noise model to all three algorithms	Fidelity/accuracy vs. noise level curves generated	
-15–16	Decoherence sensitivity study (QPCA): sweep T1/T2	Determine minimum T1/T2 for 80% of ideal performance; publish internal table	
-17–18	Measurement overhead study (QRL): shots scaling	Convergence vs. shots curve; identify shot budget for target accuracy	
-19–20	Bond-dimension sweep (Tensor Networks): accuracy vs. compute	Identify optimal operating point (Pareto front documented)	
-21–22	Compile Expected Performance Bounds Report per algorithm	G2 review board sign-off	
+13–14	Implement §2.4 model (durations, topology, crosstalk, drift, latency)	Model validated vs. published device datasheets (IBM 127q)	
+15–16	QPCA decoherence + shots sweep	Min T1/T2 for 80% ideal performance; convergence vs. shots curve	
+17–18	QRL measurement-latency study (GridWorld); shots scaling	Shot budget for target accuracy identified	
+19–20	TN bond-dimension Pareto front (accuracy vs. compute)	Optimal operating point documented	
+21–22	Crosstalk + drift robustness sweeps (all 3)	Sensitivity tables	
+23–24	Compile Expected Performance Bounds Report; finalize `PREREGISTRATION.md`	G2 board sign-off	
 
-Phase 2 Exit (Gate G2): performance under §2.4 noise ≥ 80% of ideal for all three algorithms, OR documented justification for proceeding without.
+Gate G2 (Week 24): performance ≥ 80% of ideal under §2.4, OR documented fallback scope (e.g., algorithm dropped from hardware phase).
 
 ---
 
-Part 6 — Phase 3: Real Quantum Hardware (Weeks 23–30)
+Part 6 — Phase 3: Real Hardware (Weeks 25–34)
 
 Week	Task	Verification Standard	
-23–24	Access IBM Quantum (free tier); run calibration circuits: Bell, GHZ states	Measured fidelity vs. simulator ≥ 90% for Bell state	
-25–26	Run miniaturized QPCA (6–8 qubits) with Zero-Noise Extrapolation mitigation	Eigenvalue error ≤ 0.05 vs. classical reference	
-27–28	Run miniaturized VQC/QRL agent (5–6 qubits) on hardware	Task success ≥ 80% on hardware (vs. ≥ 90% simulator)	
-29–30	Execute compressed tensor-network circuit; measure real circuit depth and transpilation overhead	Resource audit (V4) completed with hardware-specific numbers	
+25–26	IBM access; calibration circuits (Bell, GHZ)	Bell fidelity vs. sim ≥ 90% (100k shots)	
+27–28	QPCA 6-qubit eigen pipeline + eigenvector method on hardware	Eigenvalue error ≤ 0.05; clustering ARI ≥ 85% of classical	
+29–30	GridWorld 5-qubit VQC agent on hardware	Success ≥ 80%; within 15% of noisy-sim	
+31–32	Compressed TN circuit on hardware	2q depth & fidelity vs. prediction logged	
+33–34	Resource audit (V4) on real device; drift re-run after 24h	Audit complete; rerun within pre-registered drift band	
 
-Phase 3 Exit (Gate G3): hardware results within 15% of noisy-simulator predictions.
+Gate G3 (Week 34): all hardware runs within 15% of noisy-simulator predictions.
 
 ---
 
-Part 7 — Phase 4: Formal Verification & Benchmarking (Weeks 31–36)
+Part 7 — Phase 4: Formal Verification & Benchmarking (Weeks 35–40)
 
-7.1 Verification Matrix (per algorithm, all five criteria from §1.3)
+7.1 Verification Matrix
 
 Criterion	Tensor Networks	QPCA	QRL	
-V1 Correctness	MPS error ≤ 5% at fixed bond dim	Eigenvalue error ≤ 1e-4 (sim) / 0.05 (HW)	Success ≥ 90% (sim) / 80% (HW)	
-V2 Reproducibility	std ≤ 1% across 5 runs	std ≤ 1% across 5 runs	success std ≤ 5% across 5 seeds	
-V3 Noise Bounds	documented in Phase 2 report	documented in Phase 2 report	documented in Phase 2 report	
-V4 Resource Audit	qubits, depth, params logged	qubits, depth, params logged	qubits, depth, params logged	
-V5 Ablation	truncation ablation	encoding ablation	ansatz-depth ablation	
+V1	≤ 5% error @ bond dim (CI ≤ 1%)	eigenvalues ≤ 0.02 @ ≥ 100k shots; ARI ≥ 90% of classical	success ≥ 90% sim / 80% HW	
+V2	10 seeds, bootstrap CI	10 seeds, bootstrap CI	10 seeds, bootstrap CI	
+V3	Phase 2 report	Phase 2 report	Phase 2 report	
+V4	qubits, 2q depth, params	qubits, 2q depth, shots	qubits, 2q depth, shots, latency	
+V5	truncation ablation	encoding + eigenvector-method ablation	ansatz-depth ablation	
 
-7.2 Benchmark Datasets (fixed, versioned)
-- Clustering: MNIST-1k subset, synthetic concentric circles (separable only spectrally)
-- RL: CartPole-v1, 4×4 GridWorld
-- Tensor Networks: random quantum states (GHZ, W, random MPS with known entropy)
-
-7.3 Deliverables
+7.2 Deliverables
 
 Week	Deliverable	
-31–33	Re-run full test pyramid; fix failures; freeze code	
-34	Verification matrix completed and signed (G4)	
-35	Technical report + public GitHub release (tagged v1.0)	
-36	Executive summary + investment recommendation per algorithm	
+35–37	Full test pyramid re-run; failures fixed; code freeze	
+38	Verification matrix signed (G4); pre-registered analysis executed; deviations logged	
+39	Technical report + tagged release v2.0	
+40	Executive summary + per-algorithm investment recommendation	
 
 ---
 
-Part 8 — Risk Register
+Part 8 — Compute Budget (mandatory, replaces v1 omission)
 
-Risk	Likelihood	Mitigation	
-Barren plateaus in VQC training	High	Shallow ansatz, layer-wise learning, parameter initialization screening (Week 7–8 test)	
-Hardware queue costs / access limits	Medium	Free-tier first; noisy simulation accepted as fallback evidence	
-QPCA practical–theoretical gap	High	Gate G2 enforces noise study before hardware spend	
-Team bandwidth split across 3 algorithms	Medium	Strict sequencing: Tensor Networks first (lowest risk), then QPCA, then QRL	
-Dependency/version drift in quantum SDKs	Medium	Pinned versions in `environment.yml`; CI re-tests weekly	
+Phase	Workload	Est. Compute	Notes	
+Phases 1–2	Statevector sims ≤ 16 qubits; noisy sims ≤ 10 qubits	2,000 CPU-hours; 1× mid-range GPU (optional, 200 h)	qsim/lightning for speed	
+Phase 3	IBM Quantum free tier (127q access) + 200k shots/algorithm	0 (free tier); if queues block: ≤ 500 Cloud credits fallback	recorded per run	
+Storage/CI	CI artifacts, datasets, logs	50 GB	versioned	
+Contingency	+30% on all lines	—	pre-approved	
+
+Budget owner reviews at every Gate; overruns > 20% trigger scope reduction per pre-registered priority order: TN → QPCA → QRL.
 
 ---
 
-Part 9 — Milestone Summary
+Part 9 — Risk Register (with quantitative triggers)
 
-Milestone	Week	Evidence Required	
-M0: Foundations	4	CI green, repos ready, quiz passed	
-M1: Classical prototypes	12	3 algorithms pass V1–V2	
-M2: Noise characterization	22	Performance bounds report	
-M3: Hardware execution	30	Hardware runs within 15% of simulation	
-M4: Full verification	36	Signed verification matrix, report, release v1.0
+Risk	Likelihood	Trigger	Contingency	
+Barren plateaus (VQC)	High	gradient variance < 1e-6 at Week 8 screen	switch to layer-wise / local-cost ansatz (pre-approved)	
+Hardware access limits	Medium	queue > 48h or free-tier quota exhausted	noisy-sim evidence accepted; cloud credit cap 500	
+QPCA eigenvector method fails review	Medium	ARI < 90% of classical at Week 10	fallback to quantum-kernel method (pre-registered)	
+Crosstalk/drift kills hardware fidelity	Medium	G3 margin > 15%	reduce qubit count; re-scope to 5q QPCA; document	
+Team bandwidth	Medium	any track slips > 2 weeks	priority order TN → QPCA → QRL enforced	
+SDK version drift	Medium	CI weekly test failure	pinned versions; upgrade only at phase boundaries	
+
+---
+
+Part 10 — Milestone Summary
+
+Milestone	Week	Evidence	
+M0 Foundations	4	pinned env, hashed data, pre-reg draft, compute budget	
+M1 Classical prototypes	12	V1–V2 met, ≥ 10 seeds, sequential gate reviews passed	
+M2 Noise characterization	24	extended-noise report; pre-registration frozen	
+M3 Hardware execution	34	GridWorld + 6q QPCA + TN circuit within 15% of sim	
+M4 Full verification	40	signed matrix, pre-registered analysis, release v2.0	
+
+---
+
+Appendix A — Changes from v1 to v2
+1. QPCA: eigenvector extraction stage added (swap-test kernel / tomography, pre-registered choice).
+2. Hardware RL: CartPole replaced by 4×4 GridWorld; CartPole remains simulator-only.
+3. Noise model extended: gate durations, topology, crosstalk, drift, measurement latency.
+4. Statistics: ≥ 10 seeds, bootstrap 95% CI, shot budgets in all tolerances.
+5. Execution: compute budget added; sequencing contradiction resolved (parallel tracks, sequential gate reviews).
+6. Tensor Networks scope explicitly split into (a) circuit simulation, (b) classical compression, (c) hardware execution of one compressed circuit.
+7. G4 tied to pre-registered analysis with deviation log.
+8. Horizon extended 36 → 40 weeks.
